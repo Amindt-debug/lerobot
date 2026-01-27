@@ -1,9 +1,7 @@
 import time
 import numpy as np
 
-from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
 from lerobot.robots.accrea_follower import AccreaFollower, AccreaFollowerConfig
-
 from lerobot.teleoperators.gamepad.gamepad_utils import GamepadController
 from lerobot.teleoperators.utils import TeleopEvents
 
@@ -13,20 +11,16 @@ def clamp(x, lo, hi):
 
 
 def main():
-    # --- Cameras ---
-    camera_config = {
-        "base_0_rgb": OpenCVCameraConfig(index_or_path="/dev/video2", width=640, height=480, fps=30),
-        "left_wrist_0_rgb": OpenCVCameraConfig(index_or_path="/dev/video4", width=640, height=480, fps=30),
-    }
+    # ✅ Disable cameras for teleop stability (enable later for Pi0 policy)
+    camera_config = {}
 
-    # --- Robot config ---
     robot_cfg = AccreaFollowerConfig(
         id="accrea_aria_01",
         robot_ip="192.168.9.9",
         robot_port=7777,
         cameras=camera_config,
-        max_delta_per_step_rad=0.02,        # safety clamp
-        require_user_confirmation=True,     # asks once before first move
+        max_delta_per_step_rad=0.08,        # safety clamp
+        require_user_confirmation=False,     # asks once before first move
     )
 
     robot = AccreaFollower(robot_cfg)
@@ -34,42 +28,69 @@ def main():
     print("\n✅ Connecting robot...")
     robot.connect()
 
-    # --- Gamepad controller (official LeRobot) ---
-    # These step sizes are not meters anymore for us. We treat them as joint increments scaling.
-    # You can tune these.
+    obs = robot.get_observation()
+    joint_pos_keys = sorted([k for k in obs.keys() if k.startswith("joint_") and k.endswith(".pos")])
+
+    q0 = np.array([obs[k] for k in joint_pos_keys], dtype=np.float32)
+    q1 = q0.copy()
+    q1[5] += np.deg2rad(10)   # move joint 5 by 10 degrees
+
+    action = {joint_pos_keys[i]: float(q1[i]) for i in range(len(q1))}
+    action["gripper.pos"] = float(obs.get("gripper.pos", 0.5))
+
+    print("Sending 10deg move on joint 5...")
+    robot.send_action(action)
+
+    time.sleep(1.0)
+    obs2 = robot.get_observation()
+    print("joint5 before:", q0[5], "after:", obs2[joint_pos_keys[5]])
+
+
     gamepad = GamepadController(
-        x_step_size=0.03,  # rad per tick for joint0
-        y_step_size=0.03,  # rad per tick for joint1
-        z_step_size=0.03,  # rad per tick for joint2
-        deadzone=0.1,
+        x_step_size=0.20,
+        y_step_size=0.20,
+        z_step_size=0.20,
+        deadzone=0.3,
     )
+
     print("\n✅ Connecting gamepad...")
     gamepad.start()
 
     try:
-        # Initialize targets from current robot state
         obs = robot.get_observation()
-        dof = int(robot._dof)
 
-        q_target = np.array([obs[f"joint_{i}.pos"] for i in range(dof)], dtype=np.float32)
+        # ✅ detect joint pos keys automatically
+        joint_pos_keys = sorted([k for k in obs.keys() if k.startswith("joint_") and k.endswith(".pos")])
+
+        print("Detected joints:", joint_pos_keys)
+
+        q_target = np.array([obs[k] for k in joint_pos_keys], dtype=np.float32)
+        dof = len(joint_pos_keys)
+
         g_target = float(obs.get("gripper.pos", 0.5))
+
 
         print("\n==============================")
         print("✅ ACCREA JOINT TELEOP MODE")
         print("==============================")
         print("Left stick controls joint_0, joint_1")
         print("Right stick vertical controls joint_2")
-        print("RB/LB (or whatever mapped) controls gripper open/close (LeRobot uses buttons 7/6)")
-        print("B/Circle exits (LeRobot mapping).")
-        print("Y success, A failure, X rerecord (LeRobot mapping).")
+        print("RB/LB controls gripper open/close")
+        print("B exits")
         print("==============================\n")
 
-        dt = 0.05  # 20 Hz control loop
+        dt = 0.05  # 20 Hz
+
+        # ✅ IMPORTANT: robot will pause and ask for ENTER (safety)
+        # When you see "Press ENTER to allow motion..." -> press ENTER.
 
         while gamepad.running:
             gamepad.update()
 
-            # --- Exit / episode events ---
+            print("should_intervene:", gamepad.should_intervene())
+            dx, dy, dz = gamepad.get_deltas()
+            print("dx,dy,dz:", dx, dy, dz)
+
             status = gamepad.get_episode_end_status()
             if status is not None:
                 print(f"[Teleop] Episode event: {status}")
@@ -77,33 +98,32 @@ def main():
                     print("[Teleop] Exiting teleop loop...")
                     break
 
-            # --- Read joystick deltas from official GamepadController ---
             dx, dy, dz = gamepad.get_deltas()
 
-            # ✅ Map joystick deltas to JOINT target increments
-            # You can change this mapping any time.
+            # ✅ Debug: show joystick deltas when moving
+            if abs(dx) > 1e-4 or abs(dy) > 1e-4 or abs(dz) > 1e-4:
+                print(f"dx={dx:.3f}, dy={dy:.3f}, dz={dz:.3f}")
+
+            # Map joystick to joints
             q_target[0] += float(dx)
             q_target[1] += float(dy)
             q_target[2] += float(dz)
 
-            # OPTIONAL: add extra joints slowly drifting to 0
-            # q_target[3] = q_target[3]
-            # q_target[4] = q_target[4]
-            # q_target[5] = q_target[5]
-
-            # --- Gripper control from official controller flags ---
-            grip_cmd = gamepad.gripper_command()  # "open", "close", "stay"
+            # Gripper
+            grip_cmd = gamepad.gripper_command()
             if grip_cmd == "open":
                 g_target = clamp(g_target + 0.03, 0.0, 1.0)
             elif grip_cmd == "close":
                 g_target = clamp(g_target - 0.03, 0.0, 1.0)
 
-            # Build action (absolute joint targets)
-            action = {f"joint_{i}.pos": float(q_target[i]) for i in range(dof)}
+            action = {joint_pos_keys[i]: float(q_target[i]) for i in range(dof)}
             action["gripper.pos"] = float(g_target)
 
-            # Send action to robot
             robot.send_action(action)
+            if int(time.time() * 10) % 10 == 0:  # ~1Hz
+                obs2 = robot.get_observation()
+                print("joint2 now:", obs2.get(joint_pos_keys[2], None), " target:", q_target[2])
+
 
             time.sleep(dt)
 

@@ -57,7 +57,7 @@ class AccreaFollower(Robot):
     # ---------------- Connection ----------------
     @property
     def is_connected(self) -> bool:
-        cams_ok = all(cam.is_connected for cam in self.cameras.values()) if self.cameras else True
+        cams_ok = all(cam.is_connected for cam in self.cameras.values() if cam is not None) if self.cameras else True
         return (self._driver is not None) and cams_ok
 
     @check_if_already_connected
@@ -93,8 +93,16 @@ class AccreaFollower(Robot):
         self._dof = int(self._driver.dof())
 
         # Cameras
-        for cam in self.cameras.values():
-            cam.connect()
+        for name, cam in self.cameras.items():
+            try:
+                cam.connect()
+                print(f"✅ Camera connected: {name}")
+            except Exception as e:
+                print(f"⚠️ Camera {name} failed: {e}")
+                print("⚠️ Continuing without this camera.")
+                self.cameras[name] = None
+
+
 
         self.configure()
 
@@ -119,6 +127,8 @@ class AccreaFollower(Robot):
     @check_if_not_connected
     def disconnect(self) -> None:
         for cam in self.cameras.values():
+            if cam is None:
+                continue
             cam.disconnect()
 
         try:
@@ -145,6 +155,10 @@ class AccreaFollower(Robot):
 
         # Read cameras
         for cam_key, cam in self.cameras.items():
+            if cam_key is None:
+                continue
+            if cam is None:
+                continue
             obs[cam_key] = cam.async_read()
 
         # ✅ Pi0 expects BOTH wrist cameras. If you have only one wrist cam,
@@ -161,13 +175,31 @@ class AccreaFollower(Robot):
     # ---------------- Motion helpers ----------------
     def _send_joint_positions_best_effort(self, q_target: np.ndarray) -> None:
         """
-        Try to command joint positions. If the driver does not expose a position command,
-        fall back to a safe speed-based controller using command_joint_speeds.
+        Teleop-safe execution:
+        Always stream joint speeds toward the target (servo behavior),
+        because move_to_joint_positions() is not meant for high-rate teleop updates.
         """
+        # --- Prefer speed streaming (teleop servo) ---
+        if hasattr(self._driver, "command_joint_speeds"):
+            q_now = np.array(self._driver.joint_positions(), dtype=np.float32)
+            err = q_target - q_now
 
+            kp = 6.0             # stronger response
+            max_speed = 0.8      # rad/s
+            tol = 0.0005         # rad
+
+            if float(np.max(np.abs(err))) < tol:
+                qd = np.zeros_like(err)
+            else:
+                qd = kp * err
+                qd = np.clip(qd, -max_speed, max_speed)
+
+            self._driver.command_joint_speeds([float(x) for x in qd])
+            return
+
+        # --- Fallback to position methods if speeds not available ---
         q_list = [float(x) for x in q_target]
 
-        # 1) Position commands (if your python binding exposes them)
         if hasattr(self._driver, "move_to_joint_positions"):
             self._driver.move_to_joint_positions(q_list)
             return
@@ -180,16 +212,14 @@ class AccreaFollower(Robot):
             self._driver.set_joint_positions(q_list)
             return
 
-        # 2) FALLBACK: speed-based “position controller”
-        if hasattr(self._driver, "command_joint_speeds"):
-            self._move_via_joint_speeds(q_target)
-            return
-
         candidates = [m for m in dir(self._driver) if ("joint" in m) or ("move" in m)]
         raise AttributeError(
-            "No supported motion interface found in safe_robot_driver binding.\n"
+            "No supported motion interface found.\n"
             f"Available related methods: {candidates}"
-        )
+    )
+
+
+
 
     def _move_via_joint_speeds(self, q_target: np.ndarray) -> None:
         """

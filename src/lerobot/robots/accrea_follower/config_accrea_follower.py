@@ -28,3 +28,6 @@ class AccreaFollowerConfig:
     # Safety
     max_delta_per_step_rad: float = 0.02
     require_user_confirmation: bool = True
+
+    # ✅ NEW: teleop prefers joint speed streaming
+    teleop_stream_speeds: bool = True
