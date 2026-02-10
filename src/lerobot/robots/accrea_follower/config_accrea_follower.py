@@ -3,10 +3,12 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
+from lerobot.robots.config import RobotConfig
 
 
+@RobotConfig.register_subclass("accrea_follower")
 @dataclass
-class AccreaFollowerConfig:
+class AccreaFollowerConfig(RobotConfig):
     # REQUIRED by LeRobot base class
     id: str = "accrea_aria_01"
     calibration_dir: Optional[Path] = None
@@ -16,8 +18,12 @@ class AccreaFollowerConfig:
     robot_port: int = 7777
 
     # REQUIRED by safe_robot_driver (same as your minimalExample)
-    robot_urdf: Path = Path("/home/roboticslab/ALMCollection/RobotDescriptions/accrea_aria_description/urdf/aria_simplified.urdf")
-    robot_srdf: Path = Path("/home/roboticslab/ALMCollection/RobotDescriptions/accrea_aria_description/srdf/aria_simplified.srdf")
+    robot_urdf: Path = Path(
+        "/home/roboticslab/ALMCollection/RobotDescriptions/accrea_aria_description/urdf/aria_simplified.urdf"
+    )
+    robot_srdf: Path = Path(
+        "/home/roboticslab/ALMCollection/RobotDescriptions/accrea_aria_description/srdf/aria_simplified.srdf"
+    )
     environment_urdf: Path = Path("/home/roboticslab/ALMCollection/roboticslab.urdf")
     robot_package_directory: Path = Path("/home/roboticslab/ALMCollection/RobotDescriptions")
     environment_package_directory: Path = Path("/home/roboticslab/ALMCollection/RobotDescriptions")
@@ -29,5 +35,5 @@ class AccreaFollowerConfig:
     max_delta_per_step_rad: float = 0.02
     require_user_confirmation: bool = True
 
-    # ✅ NEW: teleop prefers joint speed streaming
+    # ✅ teleop prefers joint speed streaming
     teleop_stream_speeds: bool = True
