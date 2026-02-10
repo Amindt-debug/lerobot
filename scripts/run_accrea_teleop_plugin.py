@@ -7,6 +7,7 @@ from lerobot.teleoperators.accrea_gamepad_joints import (
     AccreaGamepadJointsTeleop,
     AccreaGamepadJointsTeleopConfig,
 )
+from lerobot.teleoperators.utils import TeleopEvents  # <-- ADD THIS
 
 
 def main():
@@ -29,18 +30,17 @@ def main():
     print("Teleop plugin running. Hold RB to move. START to quit.")
     try:
         while True:
-            # --- NEW: continuously anchor targets to actual robot state ---
+            # continuously anchor targets to actual robot state
             obs = robot.get_observation()
             q = np.array([obs[f"joint_{i}.pos"] for i in range(6)], dtype=float)
             g = float(obs.get("gripper.pos", 0.0))
             teleop.update_from_robot_state(q, g)
-            # ------------------------------------------------------------
 
             action = teleop.get_action()
 
             # If teleop requested termination
             events = teleop.get_teleop_events()
-            if events.get("terminate_episode", False):
+            if events.get(TeleopEvents.TERMINATE_EPISODE, False):
                 break
 
             robot.send_action(action)
