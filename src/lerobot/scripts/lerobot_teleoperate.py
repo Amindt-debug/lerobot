@@ -53,6 +53,8 @@ lerobot-teleoperate \
 
 import logging
 import time
+import numpy as np
+
 from dataclasses import asdict, dataclass
 from pprint import pformat
 
@@ -162,6 +164,14 @@ def teleop_loop(
         # given that it is the identity processor as default
         obs = robot.get_observation()
 
+        # --- Accrea gamepad teleop safety: keep targets synced to robot state ---
+        if hasattr(teleop, "update_from_robot_state"):
+            q = np.array([obs[f"joint_{i}.pos"] for i in range(6)], dtype=float)
+            g = float(obs.get("gripper.pos", 0.0))
+            teleop.update_from_robot_state(q, g)
+        # -----------------------------------------------------------------------
+    
+
         # Get teleop action
         raw_action = teleop.get_action()
 
@@ -219,6 +229,15 @@ def teleoperate(cfg: TeleoperateConfig):
 
     teleop.connect()
     robot.connect()
+        # --- Accrea gamepad teleop safety: initialize targets from current robot state ---
+    obs0 = robot.get_observation()
+    q0 = np.array([obs0[f"joint_{i}.pos"] for i in range(6)], dtype=float)
+    g0 = float(obs0.get("gripper.pos", 0.0))
+
+    if hasattr(teleop, "set_initial_targets"):
+        teleop.set_initial_targets(q0, g0)
+    # -------------------------------------------------------------------------------
+
 
     try:
         teleop_loop(
