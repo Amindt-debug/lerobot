@@ -3,6 +3,9 @@ from dataclasses import dataclass, field
 
 from ..config import TeleoperatorConfig
 
+from lerobot.teleoperators.config import TeleoperatorConfig
+
+
 
 @TeleoperatorConfig.register_subclass("accrea_gamepad_joints")
 @dataclass
