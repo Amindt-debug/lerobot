@@ -7,7 +7,7 @@ from lerobot.teleoperators.accrea_gamepad_joints import AccreaGamepadJointsTeleo
 
 
 def main():
-    robot = AccreaFollower(AccreaFollowerConfig(require_user_confirmation=True, max_delta_per_step_rad=0.10))
+    robot = AccreaFollower(AccreaFollowerConfig(require_user_confirmation=True, max_delta_per_step_rad=0.02))
     robot.connect()
 
     obs = robot.get_observation()
