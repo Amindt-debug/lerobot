@@ -189,6 +189,16 @@ class AccreaGamepadJointsTeleop(Teleoperator):
         self._q_target = np.array(q, dtype=float).copy()
         self._g_target = float(g)
 
+    def update_from_robot_state(self, q: np.ndarray, g: float) -> None:
+        """
+        Keep internal targets aligned with the real robot state.
+        This prevents 'target drift' that can cause the robot to keep moving
+        after the joystick returns to center.
+        """
+        self._q_target = np.array(q, dtype=float).copy()
+        self._g_target = float(g)
+
+
     def calibrate(self) -> None:
         # No calibration needed for gamepad teleop
         pass
