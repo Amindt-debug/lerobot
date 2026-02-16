@@ -7,7 +7,7 @@ from lerobot.teleoperators.accrea_gamepad_joints import (
     AccreaGamepadJointsTeleop,
     AccreaGamepadJointsTeleopConfig,
 )
-from lerobot.teleoperators.utils import TeleopEvents  # <-- ADD THIS
+from lerobot.teleoperators.utils import TeleopEvents 
 
 
 def main():

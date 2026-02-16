@@ -19,3 +19,4 @@ from .teleoperator import Teleoperator
 from .utils import TeleopEvents, make_teleoperator_from_config
 
 from lerobot.teleoperators.accrea_gamepad_joints import AccreaGamepadJointsTeleopConfig  # noqa: F401
+from .accrea_gamepad_cartesian import AccreaGamepadCartesianTeleop, AccreaGamepadCartesianTeleopConfig
