@@ -13,7 +13,6 @@ from lerobot.teleoperators.utils import TeleopEvents
 
 def main():
     # --- IMPORTANT: set URDF path for the cartesian teleop (Pinocchio model build) ---
-    # Change this path if your URDF lives somewhere else.
     os.environ.setdefault(
         "ACCREA_URDF_PATH",
         "/home/roboticslab/ALMCollection/RobotDescriptions/accrea_aria_description/urdf/aria_simplified.urdf",
@@ -30,54 +29,67 @@ def main():
     )
     robot.connect()
 
-    # Read initial robot state
+    # Read initial robot state (optional, but nice)
     obs = robot.get_observation()
-    q = np.array([obs[f"joint_{i}.pos"] for i in range(6)], dtype=float)
-    g = float(obs.get("gripper.pos", 0.0))
+    q0 = np.array([obs[f"joint_{i}.pos"] for i in range(6)], dtype=float)
+    g0 = float(obs.get("gripper.pos", 0.0))
 
     # --- Teleop (Cartesian) ---
     teleop = AccreaGamepadCartesianTeleop(
         AccreaGamepadCartesianTeleopConfig(
             hz=30,
-            lin_vel_mps=0.06,     # start conservative
-            yaw_vel_rps=0.8,      # start conservative
-            damping_lambda=0.06,  # a bit more damping for stability
-            max_qd_rad_s=1.0,
+            lin_vel_mps=0.08,      # conservative start
+            yaw_vel_rps=0.08,      # conservative start
+            damping_lambda=0.06,
+            max_qd_rad_s=0.9,
             ee_link="tcp",
             base_link="link_0",
         )
     )
     teleop.connect()
 
-    # Initialize targets (we keep them anchored to robot state)
-    # If your Teleoperator base class doesn't have set_initial_targets, we just rely on obs in get_action
+    # (optional) initialize targets (your cartesian teleop now anchors to q_now anyway)
+    try:
+        teleop.set_initial_targets(q0, g0)
+    except Exception:
+        pass
+
     hz = teleop.config.hz
     dt = 1.0 / float(hz)
 
     print("Cartesian teleop running.")
-    print("Hold RB (deadman) to move. Left stick = XY, D-pad up/down = Z, Right stick X = yaw, triggers = gripper. START to quit.")
+    print("Hold RB (deadman) to move. START to quit.")
 
     try:
         while True:
             obs = robot.get_observation()
 
-            # Teleop uses obs to compute action (and internally maintains q_target)
+            # print("\nCurrent robot state:")
+            # for k, v in obs.items():
+            #     print(f"  {k}: {v}")
+
             action = teleop.get_action(obs)
 
-            # exit requested?
-            events = teleop.get_events()
-            if getattr(events, "should_exit", False):
+            # print("\nTeleop action command:")
+            # for k, v in action.items():
+            #     print(f"  {k}: {v}")
+
+            # Correct way in this codebase: check dict events
+            ev = teleop.get_teleop_events()
+            if ev.get(TeleopEvents.TERMINATE_EPISODE, False):
                 break
 
-            # If action is empty (e.g., exit), skip
+            # Only send when deadman is held (your cartesian teleop returns {} otherwise)
             if action:
                 robot.send_action(action)
 
             time.sleep(dt)
 
     finally:
-        teleop.disconnect()
-        robot.disconnect()
+        try:
+            teleop.disconnect()
+        finally:
+            robot.disconnect()
 
 
 if __name__ == "__main__":

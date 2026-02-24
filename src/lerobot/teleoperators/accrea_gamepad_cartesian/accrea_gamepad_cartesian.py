@@ -5,10 +5,21 @@ from typing import Dict, Any, Optional
 import numpy as np
 
 from lerobot.teleoperators.teleoperator import Teleoperator
-from lerobot.robots.accrea_follower import AccreaFollower  # only for type hints (optional)
+# from lerobot.robots.accrea_follower import AccreaFollower  # only for type hints (optional)
 from .configuration_accrea_gamepad_cartesian import AccreaGamepadCartesianTeleopConfig
 from ..utils import TeleopEvents
 
+""""" command line example for teleoperating  
+lerobot-teleoperate \
+  --robot.type=accrea_follower \
+  --robot.id=accrea_aria_01 \
+  --robot.robot_ip=192.168.9.9 \
+  --robot.robot_port=7777 \
+  --robot.max_delta_per_step_rad=0.02 \
+  --teleop.type=accrea_gamepad_cartesian \
+  --teleop.id=xbox_0 \
+  --fps=30
+"""""
 
 def apply_deadzone(x: float, dz: float) -> float:
     return 0.0 if abs(x) < dz else float(x)
@@ -37,9 +48,9 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         self._pygame = None
         self._js = None
 
-        # internal targets
+        # internal targets (kept for compatibility with runner/scripts, but not used for motion anymore)
         self._q_target: Optional[np.ndarray] = None
-        self._g_target: float = 0.0
+        self._g_target: Optional[float] = None
 
         # pinocchio model/data
         self._pin = None
@@ -48,6 +59,47 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         self._ee_frame_id = None
 
         self._exit_requested = False
+
+    # ---------- Teleoperator interface (match joint teleop pattern) ----------
+    @property
+    def action_features(self) -> dict:
+        # absolute targets: 6 joints + 1 gripper
+        return {
+            "dtype": "float32",
+            "shape": (7,),
+            "names": {
+                "joint_0.pos": 0,
+                "joint_1.pos": 1,
+                "joint_2.pos": 2,
+                "joint_3.pos": 3,
+                "joint_4.pos": 4,
+                "joint_5.pos": 5,
+                "gripper.pos": 6,
+            },
+        }
+
+    @property
+    def feedback_features(self) -> dict:
+        return {}
+
+    def calibrate(self) -> None:
+        # No calibration needed for gamepad teleop
+        pass
+
+    def is_calibrated(self) -> bool:
+        return True
+
+    def configure(self) -> None:
+        # No extra configuration required
+        pass
+
+    def send_feedback(self, feedback: dict) -> None:
+        # No haptics/feedback used for now
+        pass
+
+    @property
+    def is_connected(self) -> bool:
+        return self._js is not None
 
     # ---------- lifecycle ----------
     def connect(self) -> None:
@@ -107,11 +159,14 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         except Exception:
             pass
 
+        self._js = None
+        self._pygame = None
+
     # ---------- required by Teleoperator ----------
     def get_action(self, obs: Dict[str, Any]) -> Dict[str, Any]:
         """
         obs contains joint positions from the robot adapter.
-        We compute q_target incrementally using Jacobian DLS.
+        We compute q_target anchored to q_now each loop (same philosophy as joint teleop).
         """
         self._pygame.event.pump()
 
@@ -126,18 +181,18 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
             q_now.append(float(obs[f"joint_{i}.pos"]))
         q_now = np.asarray(q_now, dtype=float)
 
-        # initialize targets to current
+        # gripper current
+        g_now = float(obs.get("gripper.pos", 0.0))
+
+        # initialize stored targets (kept for compatibility; does not drive motion)
         if self._q_target is None:
             self._q_target = q_now.copy()
-
-        # gripper read/initialize
-        g_now = float(obs.get("gripper.pos", 0.0))
         if self._g_target is None:
             self._g_target = g_now
 
-        # deadman
+        # deadman: NO motion when not held (joint teleop style)
         if not self._js.get_button(self.config.deadman_btn):
-            return self._pack_action(self._q_target, self._g_target)
+            return {}
 
         # gamepad axes
         lx = apply_deadzone(self._js.get_axis(self.config.lx_axis), self.config.deadzone)
@@ -167,24 +222,55 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
 
         # compute qdot via Jacobian DLS at current q_now
         qdot = self._jacobian_dls(q_now, v)
-
-        # integrate target and clip speed
         qdot = np.clip(qdot, -self.config.max_qd_rad_s, self.config.max_qd_rad_s)
-        self._q_target = self._q_target + qdot * self._dt
 
-        # gripper from triggers
+        # IMPORTANT: anchor to current q_now each loop (joint teleop style)
+        q_target = q_now + qdot * self._dt
+
+        # gripper from triggers (anchored to g_now each loop)
         lt = (self._js.get_axis(self.config.lt_axis) + 1.0) / 2.0  # [0,1]
         rt = (self._js.get_axis(self.config.rt_axis) + 1.0) / 2.0
         # open = LT, close = RT (swap if you prefer)
-        self._g_target = float(np.clip(self._g_target + (lt - rt) * self.config.gripper_rate * self._dt, 0.0, 1.0))
+        g_target = float(np.clip(g_now + (lt - rt) * self.config.gripper_rate * self._dt, 0.0, 1.0))
 
-        return self._pack_action(self._q_target, self._g_target)
+        # also update stored targets (optional; keeps state consistent for external callers)
+        self._q_target = q_target.copy()
+        self._g_target = g_target
 
+        return self._pack_action(q_target, g_target)
+
+    # match joint teleop naming for events (processor expects this)
+    def get_teleop_events(self) -> dict[str, Any]:
+        # minimal: allow pipeline to stop if START pressed
+        exit_requested = getattr(self, "_exit_requested", False)
+        return {
+            TeleopEvents.IS_INTERVENTION: True,
+            TeleopEvents.TERMINATE_EPISODE: exit_requested,
+            TeleopEvents.SUCCESS: False,
+            TeleopEvents.RERECORD_EPISODE: False,
+        }
+
+    # Keep an alias for older callers (harmless)
     def get_events(self) -> TeleopEvents:
         events = TeleopEvents()
         if self._exit_requested:
             events.should_exit = True
         return events
+
+    # same pattern as joint teleop: allow runner to initialize targets explicitly
+    def set_initial_targets(self, q: np.ndarray, g: float) -> None:
+        """Call once after connecting robot: sets initial joint/gripper targets to current state."""
+        self._q_target = np.array(q, dtype=float).copy()
+        self._g_target = float(g)
+
+    def update_from_robot_state(self, q: np.ndarray, g: float) -> None:
+        """
+        Keep internal targets aligned with the real robot state.
+        This prevents 'target drift' that can cause the robot to keep moving
+        after the joystick returns to center.
+        """
+        self._q_target = np.array(q, dtype=float).copy()
+        self._g_target = float(g)
 
     # ---------- helpers ----------
     def _pack_action(self, q: np.ndarray, g: float) -> Dict[str, Any]:
@@ -206,7 +292,7 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         pin.updateFramePlacements(model, data)
 
         # 6xN Jacobian in WORLD frame
-        J = pin.computeFrameJacobian(model, data, q, ee_id, pin.ReferenceFrame.WORLD)
+        J = pin.computeFrameJacobian(model, data, q, ee_id, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
 
         lam = float(self.config.damping_lambda)
         JJt = J @ J.T
