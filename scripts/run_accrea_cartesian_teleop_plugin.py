@@ -31,17 +31,23 @@ def main():
 
     # Read initial robot state (optional, but nice)
     obs = robot.get_observation()
-    q0 = np.array([obs[f"joint_{i}.pos"] for i in range(6)], dtype=float)
+    dof = int(getattr(robot, "_dof", 0) or 0)
+    if dof <= 0:
+        # fallback: infer from obs keys
+        dof = len([k for k in obs.keys() if k.startswith("joint_") and k.endswith(".pos")])
+    q0 = np.array([obs[f"joint_{i}.pos"] for i in range(dof)], dtype=float)
     g0 = float(obs.get("gripper.pos", 0.0))
 
     # --- Teleop (Cartesian) ---
     teleop = AccreaGamepadCartesianTeleop(
         AccreaGamepadCartesianTeleopConfig(
-            hz=30,
-            lin_vel_mps=0.08,      # conservative start
-            yaw_vel_rps=0.08,      # conservative start
+            hz=60,
+            lin_vel_mps=0.4,
+            roll_vel_rps=0.4,
+            pitch_vel_rps=0.4,
+            yaw_vel_rps=0.4,
             damping_lambda=0.06,
-            max_qd_rad_s=0.9,
+            max_qd_rad_s=1.0,
             ee_link="tcp",
             base_link="link_0",
         )

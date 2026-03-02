@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from lerobot.teleoperators.teleoperator import TeleoperatorConfig
 
+
+@TeleoperatorConfig.register_subclass("accrea_gamepad_cartesian")
 @dataclass
 class AccreaGamepadCartesianTeleopConfig(TeleoperatorConfig):
     # loop
@@ -25,6 +27,8 @@ class AccreaGamepadCartesianTeleopConfig(TeleoperatorConfig):
     # TCP control speeds
     lin_vel_mps: float = 0.05     # max translation speed at full stick
     yaw_vel_rps: float = 0.5      # yaw rate (rad/s) at full stick
+    roll_vel_rps: float = 0.5      # roll rate (rad/s) at full stick
+    pitch_vel_rps: float = 0.5     # pitch rate (rad/s) at full stick
 
     # gripper
     gripper_rate: float = 1.5     # units/s in [0..1]

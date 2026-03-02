@@ -211,14 +211,18 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         #   left stick: x/y
         #   dpad up/down: z
         #   right stick x: yaw
-        vx = self.config.lin_vel_mps * lx
-        vy = self.config.lin_vel_mps * (-ly)   # invert so up is +y (feel free to flip)
+        # translation
+        vx = self.config.lin_vel_mps * float(lx)
+        vy = self.config.lin_vel_mps * float(-ly)
         vz = self.config.lin_vel_mps * float(haty)
 
-        wz = self.config.yaw_vel_rps * rx
+        # rotation (3 independent controls!)
+        wz = self.config.yaw_vel_rps   * float(rx)     # yaw
+        wy = self.config.pitch_vel_rps * float(ry)     # pitch
+        wx = self.config.roll_vel_rps  * float(hatx)   # roll (dpad)
 
         # 6D twist in base frame: [vx,vy,vz, wx,wy,wz]
-        v = np.array([vx, vy, vz, 0.0, 0.0, wz], dtype=float)
+        v = np.array([vx, vy, vz, wx, wy, wz], dtype=float)
 
         # compute qdot via Jacobian DLS at current q_now
         qdot = self._jacobian_dls(q_now, v)
@@ -282,6 +286,9 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         """
         Damped least squares:
           qdot = J^T (J J^T + λ^2 I)^-1 v
+          Study: 
+          1) https://www.researchgate.net/publication/225116386_Experimental_results_on_controlling_a_6-DOF_robot_manipulator_in_the_neighborhood_of_kinematic_singularities
+          2) https://www.sciencedirect.com/science/article/pii/S0263224120313154 (2021)
         """
         pin = self._pin
         model = self._model
