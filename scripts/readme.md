@@ -32,3 +32,11 @@ lerobot-teleoperate \
   --teleop.max_qd_rad_s=1.2 \
   --teleop.ee_link=tcp \
   --display_data=false
+
+
+## If DNS breaks again and I can not push to Git ( You only had to run the DNS fix because initially your system couldn’t resolve github.com. Now that you set DNS via NetworkManager, it should stay fixed — but if it ever breaks again, repeat these two lines )
+
+sudo nmcli connection modify "Wired connection 2" ipv4.dns "1.1.1.1 8.8.8.8"
+sudo nmcli connection modify "Wired connection 2" ipv4.ignore-auto-dns yes
+
+
