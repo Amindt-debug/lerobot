@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import time
 from typing import Dict, Any, Optional
 
 import numpy as np
@@ -59,6 +60,8 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         self._ee_frame_id = None
 
         self._exit_requested = False
+        self._success_requested = False
+        self._rerecord_requested = False
 
     # ---------- Teleoperator interface (match joint teleop pattern) ----------
     @property
@@ -116,6 +119,10 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         self._js = pygame.joystick.Joystick(self.config.joystick_index)
         self._js.init()
 
+        # debug1
+        print(f"[accrea_gamepad_cartesian] Joystick name: {self._js.get_name()}")
+        print(f"[accrea_gamepad_cartesian] Num axes: {self._js.get_numaxes()}  Num buttons: {self._js.get_numbuttons()}  Num hats: {self._js.get_numhats()}")
+
         # Pinocchio import
         try:
             import pinocchio as pin
@@ -129,12 +136,19 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
 
         # Load URDF from robot config via env var (set by runner) OR default path.
         # In LeRobot, best practice is: we pass the robot's urdf path into the teleop config or env.
-        urdf_path = os.environ.get("ACCREA_URDF_PATH", "")
+        from pathlib import Path
+        import os
+
+        urdf_path = self.config.urdf_path or os.environ.get("ACCREA_URDF_PATH", "")
         if not urdf_path:
             raise RuntimeError(
-                "ACCREA_URDF_PATH env var not set. "
-                "Set it to the URDF file path so the teleop can build kinematics."
+                "Missing URDF path. Pass --teleop.urdf_path=/abs/path/to/aria_simplified.urdf "
+                "or set ACCREA_URDF_PATH."
             )
+        urdf_path = str(Path(urdf_path).expanduser().resolve())
+
+        # Debug2
+        print(f"[accrea_gamepad_cartesian] Using URDF: {urdf_path}")
 
         # Build model
         self._model = pin.buildModelFromUrdf(urdf_path)
@@ -145,6 +159,8 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         if not self._model.existFrame(ee):
             raise RuntimeError(f"EE frame '{ee}' not found in URDF model frames. Check urdf and ee_link.")
         self._ee_frame_id = self._model.getFrameId(ee)
+
+        print(f"[accrea_gamepad_cartesian] EE frame '{ee}' id = {self._ee_frame_id}")
 
     def disconnect(self) -> None:
         try:
@@ -170,16 +186,48 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         """
         self._pygame.event.pump()
 
+        if not hasattr(self, "_printed_mapping"):
+            self._printed_mapping = True
+            print("[accrea_gamepad_cartesian] Mapping:",
+                f"lx={self.config.lx_axis} ly={self.config.ly_axis} rx={self.config.rx_axis} ry={self.config.ry_axis}",
+                f"lt={self.config.lt_axis} rt={self.config.rt_axis}",
+                f"deadman_btn={self.config.deadman_btn} exit_btn={self.config.exit_btn}",
+                f"hat_idx={self.config.hat_idx}")
+
         # exit
         if self._js.get_button(self.config.exit_btn):
             self._exit_requested = True
             return {}
+        
+        # success / rerecord (one-shot flags)
+        # Xbox typical mapping: X=2, Y=3 (may differ; adjust if needed)
+        if self._js.get_button(3):   # Y button
+            self._success_requested = True
+
+        if self._js.get_button(2):   # X button
+            self._rerecord_requested = True
+        
+        # success / rerecord (one-shot flags)
+        # Xbox typical mapping: X=2, Y=3 (may differ; adjust if needed)
+        if self._js.get_button(3):   # Y button
+            self._success_requested = True
+
+        if self._js.get_button(2):   # X button
+            self._rerecord_requested = True
 
         # read current robot joints from obs
         q_now = []
         for i in range(6):
             q_now.append(float(obs[f"joint_{i}.pos"]))
         q_now = np.asarray(q_now, dtype=float)
+
+        # debug3 (print at most once per second)
+        if not hasattr(self, "_t_last_joint_print"):
+            self._t_last_joint_print = 0.0
+        t = time.time()
+        if t - self._t_last_joint_print > 1.0:
+            self._t_last_joint_print = t
+            print(f"[accrea_gamepad_cartesian] q_now: {q_now}")
 
         # gripper current
         g_now = float(obs.get("gripper.pos", 0.0))
@@ -200,6 +248,14 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         rx = apply_deadzone(self._js.get_axis(self.config.rx_axis), self.config.deadzone)
         # ry available if you want (e.g., z)
         ry = apply_deadzone(self._js.get_axis(self.config.ry_axis), self.config.deadzone)
+
+        if not hasattr(self, "_t_last_print"):
+            self._t_last_print = 0.0
+        t = time.time()
+        if t - self._t_last_print > 1.0:
+            self._t_last_print = t
+            print(f"[accrea_gamepad_cartesian] axes lx={lx:.2f} ly={ly:.2f} rx={rx:.2f} ry={ry:.2f} "
+                f"deadman={self._js.get_button(self.config.deadman_btn)} start={self._js.get_button(self.config.exit_btn)}")
 
         # hats (dpad) for z
         hatx, haty = 0, 0
@@ -245,14 +301,23 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
 
     # match joint teleop naming for events (processor expects this)
     def get_teleop_events(self) -> dict[str, Any]:
-        # minimal: allow pipeline to stop if START pressed
+        # these flags are set in get_action()
         exit_requested = getattr(self, "_exit_requested", False)
-        return {
+        success_requested = getattr(self, "_success_requested", False)
+        rerecord_requested = getattr(self, "_rerecord_requested", False)
+
+        events = {
             TeleopEvents.IS_INTERVENTION: True,
             TeleopEvents.TERMINATE_EPISODE: exit_requested,
-            TeleopEvents.SUCCESS: False,
-            TeleopEvents.RERECORD_EPISODE: False,
+            TeleopEvents.SUCCESS: success_requested,
+            TeleopEvents.RERECORD_EPISODE: rerecord_requested,
         }
+
+        # Optional: consume one-shot flags so holding the button doesn't repeat forever
+        self._success_requested = False
+        self._rerecord_requested = False
+
+        return events
 
     # Keep an alias for older callers (harmless)
     def get_events(self) -> TeleopEvents:

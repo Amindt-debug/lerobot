@@ -124,6 +124,14 @@ class TeleoperateConfig:
     display_compressed_images: bool = False
 
 
+def _hold_action_from_obs(obs: dict) -> dict:
+    hold = {f"joint_{i}.pos": float(obs[f"joint_{i}.pos"]) for i in range(6)}
+    # keep gripper stable if available
+    if "gripper.pos" in obs:
+        hold["gripper.pos"] = float(obs["gripper.pos"])
+    return hold    
+
+
 def teleop_loop(
     teleop: Teleoperator,
     robot: Robot,
@@ -158,31 +166,87 @@ def teleop_loop(
     while True:
         loop_start = time.perf_counter()
 
-        # Get robot observation
-        # Not really needed for now other than for visualization
-        # teleop_action_processor can take None as an observation
-        # given that it is the identity processor as default
-        obs = robot.get_observation()
+        # --- DEBUG: stage marker ---
+        logging.debug("[loop] start")
 
-        # --- Accrea gamepad teleop safety: keep targets synced to robot state ---
+        # 1) observation
+        try:
+            obs = robot.get_observation()
+        except Exception:
+            logging.exception("[loop] robot.get_observation() failed")
+            raise
+
+        # Print obs keys once
+        if not hasattr(teleop_loop, "_printed_obs_keys"):
+            teleop_loop._printed_obs_keys = True
+            logging.info("[debug] obs keys (first 40): %s", sorted(list(obs.keys()))[:40])
+
+        # Optional: keep targets synced (your block) — guard KeyError
         if hasattr(teleop, "update_from_robot_state"):
-            q = np.array([obs[f"joint_{i}.pos"] for i in range(6)], dtype=float)
-            g = float(obs.get("gripper.pos", 0.0))
-            teleop.update_from_robot_state(q, g)
-        # -----------------------------------------------------------------------
-    
+            try:
+                q = np.array([obs[f"joint_{i}.pos"] for i in range(6)], dtype=float)
+                g = float(obs.get("gripper.pos", 0.0))
+                teleop.update_from_robot_state(q, g)
+            except KeyError:
+                logging.error("[loop] Missing expected joint keys joint_0.pos..joint_5.pos in obs")
+                logging.error("[loop] Available keys (first 60): %s", list(obs.keys())[:60])
+                raise
 
-        # Get teleop action
-        raw_action = teleop.get_action()
+        # 2) teleop action
+        try:
+            raw_action = teleop.get_action(obs)
+        except Exception:
+            logging.exception("[loop] teleop.get_action(obs) failed")
+            raise
 
-        # Process teleop action through pipeline
-        teleop_action = teleop_action_processor((raw_action, obs))
+        # Print teleop raw keys once
+        if not hasattr(teleop_loop, "_printed_raw_action"):
+            teleop_loop._printed_raw_action = True
+            logging.info("[debug] raw_action type=%s keys=%s",
+                        type(raw_action), list(raw_action.keys()) if isinstance(raw_action, dict) else None)
 
-        # Process action for robot through pipeline
-        robot_action_to_send = robot_action_processor((teleop_action, obs))
+        # 3) processors + HOLD fallback when deadman not pressed
+        try:
+            if isinstance(raw_action, dict) and len(raw_action) == 0:
+                # Deadman not pressed => do NOT send empty dict. Hold current pose.
+                teleop_action = raw_action  # keep for logging/visualization
+                robot_action_to_send = _hold_action_from_obs(obs)
+            else:
+                teleop_action = teleop_action_processor((raw_action, obs))
+                robot_action_to_send = robot_action_processor((teleop_action, obs))
+        except Exception:
+            logging.exception("[loop] action processors failed")
+            raise
 
-        # Send processed action to robot (robot_action_processor.to_output should return RobotAction)
-        _ = robot.send_action(robot_action_to_send)
+        # Print action features / sent keys once (keep your existing block here)
+
+        # 4) send action
+        try:
+            _ = robot.send_action(robot_action_to_send)
+        except Exception:
+            logging.exception("[loop] robot.send_action(...) failed")
+            raise
+
+        # 4) send action
+        try:
+            _ = robot.send_action(robot_action_to_send)
+        except Exception:
+            logging.exception("[loop] robot.send_action(...) failed")
+            raise
+
+        # 5) optional: allow START to exit cleanly
+        if hasattr(teleop, "get_teleop_events"):
+            ev = teleop.get_teleop_events()
+            # This depends on what TeleopEvents constants actually are; we’ll refine if needed.
+            # For now, also support a plain string key.
+            terminate = False
+            if isinstance(ev, dict):
+                terminate = bool(ev.get("terminate_episode", False)) or bool(ev.get("TERMINATE_EPISODE", False))
+            if terminate:
+                logging.info("[loop] Teleop requested termination. Exiting.")
+                return
+
+        ...
 
         if display_data:
             # Process robot observation through pipeline
@@ -229,7 +293,7 @@ def teleoperate(cfg: TeleoperateConfig):
 
     teleop.connect()
     robot.connect()
-        # --- Accrea gamepad teleop safety: initialize targets from current robot state ---
+    # --- Accrea gamepad teleop safety: initialize targets from current robot state ---
     obs0 = robot.get_observation()
     q0 = np.array([obs0[f"joint_{i}.pos"] for i in range(6)], dtype=float)
     g0 = float(obs0.get("gripper.pos", 0.0))

@@ -40,3 +40,4 @@ class AccreaGamepadCartesianTeleopConfig(TeleoperatorConfig):
     # kinematics frames (URDF link names)
     base_link: str = "link_0"
     ee_link: str = "tcp"          # your added tcp link
+    urdf_path: str = ""
