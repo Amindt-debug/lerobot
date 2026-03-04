@@ -75,13 +75,19 @@ def find_all_realsense_cameras() -> list[dict[str, Any]]:
     """
     all_realsense_cameras_info: list[dict[str, Any]] = []
     logger.info("Searching for RealSense cameras...")
+
+    # Robust guard: if pyrealsense2 isn't importable, don't even try RealSenseCamera.find_cameras().
+    try:
+        import pyrealsense2 as _rs  # noqa: F401
+    except Exception:
+        logger.warning("Skipping RealSense camera search: pyrealsense2 not available.")
+        return all_realsense_cameras_info
+
     try:
         realsense_cameras = RealSenseCamera.find_cameras()
         for cam_info in realsense_cameras:
             all_realsense_cameras_info.append(cam_info)
         logger.info(f"Found {len(realsense_cameras)} RealSense cameras.")
-    except ImportError:
-        logger.warning("Skipping RealSense camera search: pyrealsense2 library not found or not importable.")
     except Exception as e:
         logger.error(f"Error finding RealSense cameras: {e}")
 
