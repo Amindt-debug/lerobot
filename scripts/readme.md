@@ -18,18 +18,18 @@ lerobot-teleoperate \
   --robot.id=accrea_aria_01 \
   --robot.robot_ip=192.168.9.9 \
   --robot.robot_port=7777 \
-  --robot.max_delta_per_step_rad=0.05 \
+  --robot.max_delta_per_step_rad=0.07 \
   --robot.require_user_confirmation=false \
   --teleop.type=accrea_gamepad_cartesian \
   --teleop.id=xbox_0 \
   --teleop.hz=60 \
   --fps=60 \
-  --teleop.lin_vel_mps=0.5 \
-  --teleop.roll_vel_rps=0.5 \
-  --teleop.pitch_vel_rps=0.5 \
-  --teleop.yaw_vel_rps=0.5 \
+  --teleop.lin_vel_mps=0.7 \
+  --teleop.roll_vel_rps=0.7 \
+  --teleop.pitch_vel_rps=0.7 \
+  --teleop.yaw_vel_rps=0.7 \
   --teleop.damping_lambda=0.04 \
-  --teleop.max_qd_rad_s=1.2 \
+  --teleop.max_qd_rad_s=1.4 \
   --teleop.ee_link=tcp \
   --display_data=false
 
@@ -39,4 +39,6 @@ lerobot-teleoperate \
 sudo nmcli connection modify "Wired connection 2" ipv4.dns "1.1.1.1 8.8.8.8"
 sudo nmcli connection modify "Wired connection 2" ipv4.ignore-auto-dns yes
 
+
+## ** ToDo: Adapting URDF file with respect to my setup ** ##
 
