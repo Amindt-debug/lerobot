@@ -207,13 +207,6 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         if self._js.get_button(2):   # X button
             self._rerecord_requested = True
         
-        # success / rerecord (one-shot flags)
-        # Xbox typical mapping: X=2, Y=3 (may differ; adjust if needed)
-        if self._js.get_button(3):   # Y button
-            self._success_requested = True
-
-        if self._js.get_button(2):   # X button
-            self._rerecord_requested = True
 
         # read current robot joints from obs
         q_now = []
