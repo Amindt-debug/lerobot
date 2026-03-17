@@ -263,11 +263,11 @@ class AccreaGamepadCartesianTeleop(Teleoperator):
         # translation
         vx = self.config.lin_vel_mps * float(lx)
         vy = self.config.lin_vel_mps * float(-ly)
-        vz = self.config.lin_vel_mps * float(haty)
+        vz = self.config.lin_vel_mps * float(-ry)
 
         # rotation (3 independent controls!)
         wz = self.config.yaw_vel_rps   * float(rx)     # yaw
-        wy = self.config.pitch_vel_rps * float(ry)     # pitch
+        wy = self.config.pitch_vel_rps * float(haty)     # pitch
         wx = self.config.roll_vel_rps  * float(hatx)   # roll (dpad)
 
         # 6D twist in base frame: [vx,vy,vz, wx,wy,wz]

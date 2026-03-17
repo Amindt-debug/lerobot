@@ -353,7 +353,7 @@ def record_loop(
         if policy is not None or dataset is not None:
             observation_frame = build_dataset_frame(dataset.features, obs_processed, prefix=OBS_STR)
 
-        # Get action from either policy or teleop
+
         if policy is not None and preprocessor is not None and postprocessor is not None:
             action_values = predict_action(
                 observation=observation_frame,
@@ -367,12 +367,23 @@ def record_loop(
             )
 
             act_processed_policy: RobotAction = make_robot_action(action_values, dataset.features)
+            robot_action_to_send = robot_action_processor((act_processed_policy, obs))
+            action_values = act_processed_policy
 
         elif policy is None and isinstance(teleop, Teleoperator):
-            act = teleop.get_action()
+            # IMPORTANT: pass obs to your custom teleop
+            act = teleop.get_action(obs)
 
-            # Applies a pipeline to the raw teleop action, default is IdentityProcessor
-            act_processed_teleop = teleop_action_processor((act, obs))
+            # If deadman is not pressed, teleop returns {}.
+            # In that case, hold the current robot pose instead of sending an empty dict.
+            if isinstance(act, dict) and len(act) == 0:
+                act_processed_teleop = act
+                robot_action_to_send = _hold_action_from_obs(obs)
+                action_values = robot_action_to_send
+            else:
+                act_processed_teleop = teleop_action_processor((act, obs))
+                robot_action_to_send = robot_action_processor((act_processed_teleop, obs))
+                action_values = act_processed_teleop
 
         elif policy is None and isinstance(teleop, list):
             arm_action = teleop_arm.get_action()
@@ -381,6 +392,9 @@ def record_loop(
             base_action = robot._from_keyboard_to_base_action(keyboard_action)
             act = {**arm_action, **base_action} if len(base_action) > 0 else arm_action
             act_processed_teleop = teleop_action_processor((act, obs))
+            robot_action_to_send = robot_action_processor((act_processed_teleop, obs))
+            action_values = act_processed_teleop
+
         else:
             no_action_count += 1
             if no_action_count == 1 or no_action_count % 10 == 0:
@@ -390,14 +404,6 @@ def record_loop(
                     "The robot won't be at its rest position at the start of the next episode."
                 )
             continue
-
-        # Applies a pipeline to the action, default is IdentityProcessor
-        if policy is not None and act_processed_policy is not None:
-            action_values = act_processed_policy
-            robot_action_to_send = robot_action_processor((act_processed_policy, obs))
-        else:
-            action_values = act_processed_teleop
-            robot_action_to_send = robot_action_processor((act_processed_teleop, obs))
 
         # Send action to robot
         # Action can eventually be clipped using `max_relative_target`,
@@ -602,6 +608,12 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
         log_say("Exiting", cfg.play_sounds)
     return dataset
 
+
+def _hold_action_from_obs(obs: dict) -> dict:
+    hold = {f"joint_{i}.pos": float(obs[f"joint_{i}.pos"]) for i in range(6)}
+    if "gripper.pos" in obs:
+        hold["gripper.pos"] = float(obs["gripper.pos"])
+    return hold
 
 def main():
     register_third_party_plugins()

@@ -88,12 +88,12 @@ lerobot-teleoperate \
   --teleop.id=xbox_0 \
   --teleop.hz=60 \
   --fps=30 \
-  --teleop.lin_vel_mps=0.7 \
-  --teleop.roll_vel_rps=0.7 \
-  --teleop.pitch_vel_rps=0.7 \
-  --teleop.yaw_vel_rps=0.7 \
+  --teleop.lin_vel_mps=1.0 \
+  --teleop.roll_vel_rps=1.0 \
+  --teleop.pitch_vel_rps=1.0 \
+  --teleop.yaw_vel_rps=1.0 \
   --teleop.damping_lambda=0.04 \
-  --teleop.max_qd_rad_s=1.4 \
+  --teleop.max_qd_rad_s=1.6 \
   --teleop.ee_link=tcp \
   --display_data=true \
   --display_ip=192.168.88.243 \
